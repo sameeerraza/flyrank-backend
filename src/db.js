@@ -40,4 +40,12 @@ function getTaskById(id) {
   return row ? toTask(row) : undefined;
 }
 
-module.exports = { getAllTasks, getTaskById };
+function createTask(title) {
+  const result = db
+    .prepare("INSERT INTO tasks (title, done) VALUES (?, 0)")
+    .run(title);
+
+  return getTaskById(result.lastInsertRowid);
+}
+
+module.exports = { getAllTasks, getTaskById, createTask };

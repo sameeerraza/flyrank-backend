@@ -1,7 +1,7 @@
 const express = require("express");
 const swaggerUi = require("swagger-ui-express");
 const openapiSpec = require("../openapi.json");
-const { getAllTasks, getTaskById } = require("./db");
+const { getAllTasks, getTaskById, createTask } = require("./db");
 
 const app = express();
 const PORT = 3000;
@@ -45,11 +45,7 @@ app.post("/tasks", (req, res) => {
     return res.status(400).json({ error: "Title is required" });
   }
 
-  const newId =
-    tasks.length === 0 ? 1 : Math.max(...tasks.map((t) => t.id)) + 1;
-
-  const newTask = { id: newId, title: title.trim(), done: false };
-  tasks.push(newTask);
+  const newTask = createTask(title.trim());
 
   res.status(201).json(newTask);
 });
