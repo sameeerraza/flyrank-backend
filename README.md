@@ -1,10 +1,10 @@
 # Task API
 
 A small CRUD API for managing a to-do list. Built for the FlyRank internship
-backend track (W2 · A1). Tasks are stored in memory, so data resets when the
-server restarts.
+backend track (W2 · A1, W3 · A1). Tasks are stored in a SQLite database, so
+data survives server restarts.
 
-Built with Node.js and Express.
+Built with Node.js, Express, and SQLite (via `better-sqlite3`).
 
 ## Run it
 
@@ -16,6 +16,9 @@ npm start
 ```
 
 The server starts on http://localhost:3000
+
+The endpoint table below is unchanged from the in-memory version. Only
+the storage layer was replaced.
 
 ## Endpoints
 
@@ -47,6 +50,44 @@ The server starts on http://localhost:3000
   `title` follows the same rule as above; `done` must be a boolean.
 - Malformed JSON bodies and unexpected server errors return a JSON error
   message instead of leaking a stack trace.
+
+## Database
+
+Data is stored in SQLite, in a single file at `tasks.db` in the project
+root. All SQL lives in `src/db.js` — the route handlers in `src/index.js`
+never touch SQL directly, so swapping to another database later only means
+changing that one file.
+
+**Why SQLite:** the assignment needs real persistence without the overhead
+of running a separate database server. SQLite needs no installation and no
+server process — it's just a file, which is exactly the difference this
+project is meant to demonstrate: the API works the same whether tasks live
+in an array or in a database.
+
+`tasks.db` is listed in `.gitignore` (via the `*.db` pattern) and is not
+committed. It's generated data, not source code — each developer (or CI run)
+gets a fresh database on first start, seeded automatically with 3 example
+tasks by `src/db.js`.
+
+SQLite has no boolean type, so `done` is stored as `0`/`1` and converted
+to `true`/`false` in `src/db.js` before it leaves the API. The stored
+shape changed; the API shape did not.
+
+### Example query
+
+Opened in DB Browser for SQLite:
+
+```sql
+SELECT * FROM tasks WHERE done = 1;
+```
+
+| id | title         | done |
+|----|---------------|------|
+| 2  | Finish report | 1    |
+
+![Browsing the tasks table](docs/database.png)
+
+![Running a SELECT query](docs/sql-query.png)
 
 ## Example request
 
