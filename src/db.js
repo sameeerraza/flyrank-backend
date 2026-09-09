@@ -1,79 +1,54 @@
-const path = require("path");
-const Database = require("better-sqlite3");
+const { Pool } = require("pg");
 
-const db = new Database(path.join(__dirname, "..", "tasks.db"));
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS tasks (
-    id INTEGER PRIMARY KEY,
-    title TEXT NOT NULL,
-    done BOOLEAN NOT NULL DEFAULT 0
-  )
-`);
+// Stage 1: create the table if it's missing, then seed 3 example tasks
+// only when the table is completely empty.
+async function init() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      done BOOLEAN NOT NULL DEFAULT false
+    )
+  `);
 
-const { count } = db.prepare("SELECT COUNT(*) AS count FROM tasks").get();
+  const { rows } = await pool.query("SELECT COUNT(*)::int AS count FROM tasks");
 
-if (count === 0) {
-  const insert = db.prepare(
-    "INSERT INTO tasks (title, done) VALUES (?, ?)"
-  );
-
-  insert.run("Buy groceries", 0);
-  insert.run("Finish report", 1);
-  insert.run("Call the dentist", 0);
+  if (rows[0].count === 0) {
+    await pool.query(
+      `INSERT INTO tasks (title, done) VALUES
+        ($1, $2), ($3, $4), ($5, $6)`,
+      ["Buy groceries", false, "Finish report", true, "Call the dentist", false]
+    );
+  }
 }
 
-function toTask(row) {
-  return { ...row, done: !!row.done };
-}
+// --- CRUD: still broken on purpose. Stage 2 (create/read) and Stage 3
+// (update/delete) will port these to real SQL queries. ---
 
 function getAllTasks() {
-  const rows = db.prepare("SELECT id, title, done FROM tasks").all();
-  return rows.map(toTask);
+  throw new Error("getAllTasks not implemented yet (Stage 2)");
 }
 
 function getTaskById(id) {
-  const row = db
-    .prepare("SELECT id, title, done FROM tasks WHERE id = ?")
-    .get(id);
-
-  return row ? toTask(row) : undefined;
+  throw new Error("getTaskById not implemented yet (Stage 2)");
 }
 
 function createTask(title) {
-  const result = db
-    .prepare("INSERT INTO tasks (title, done) VALUES (?, 0)")
-    .run(title);
-
-  return getTaskById(result.lastInsertRowid);
+  throw new Error("createTask not implemented yet (Stage 2)");
 }
 
-function updateTask(id, { title, done }) {
-  const sets = [];
-  const values = [];
-
-  if (title !== undefined) {
-    sets.push("title = ?");
-    values.push(title);
-  }
-
-  if (done !== undefined) {
-    sets.push("done = ?");
-    values.push(done ? 1 : 0);
-  }
-
-  values.push(id);
-  db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...values);
-
-  return getTaskById(id);
+function updateTask(id, fields) {
+  throw new Error("updateTask not implemented yet (Stage 3)");
 }
 
 function deleteTask(id) {
-  const result = db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
-  return result.changes > 0;
+  throw new Error("deleteTask not implemented yet (Stage 3)");
 }
 
 module.exports = {
+  init,
   getAllTasks,
   getTaskById,
   createTask,
