@@ -1,16 +1,16 @@
 const express = require("express");
 const swaggerUi = require("swagger-ui-express");
 const openapiSpec = require("../openapi.json");
-const { getAllTasks, getTaskById, createTask } = require("./db");
+const {
+  getAllTasks,
+  getTaskById,
+  createTask,
+  updateTask,
+  deleteTask,
+} = require("./db");
 
 const app = express();
 const PORT = 3000;
-
-const tasks = [
-  { id: 1, title: "Buy groceries", done: false },
-  { id: 2, title: "Finish report", done: true },
-  { id: 3, title: "Call the dentist", done: false },
-];
 
 app.use(express.json());
 app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec));
@@ -52,7 +52,7 @@ app.post("/tasks", (req, res) => {
 
 app.put("/tasks/:id", (req, res) => {
   const id = Number(req.params.id);
-  const task = tasks.find((t) => t.id === id);
+  const task = getTaskById(id);
 
   if (!task) {
     return res.status(404).json({ error: `Task ${id} not found` });
@@ -64,32 +64,28 @@ app.put("/tasks/:id", (req, res) => {
     return res.status(400).json({ error: "Nothing to update" });
   }
 
-  if (title !== undefined) {
-    if (typeof title !== "string" || title.trim() === "") {
-      return res.status(400).json({ error: "Title must be a non-empty string" });
-    }
-    task.title = title.trim();
+  if (title !== undefined && (typeof title !== "string" || title.trim() === "")) {
+    return res.status(400).json({ error: "Title must be a non-empty string" });
   }
 
-  if (done !== undefined) {
-    if (typeof done !== "boolean") {
-      return res.status(400).json({ error: "Done must be a boolean" });
-    }
-    task.done = done;
+  if (done !== undefined && typeof done !== "boolean") {
+    return res.status(400).json({ error: "Done must be a boolean" });
   }
 
-  res.status(200).json(task);
+  const updatedTask = updateTask(id, {
+    title: title !== undefined ? title.trim() : undefined,
+    done,
+  });
+
+  res.status(200).json(updatedTask);
 });
 
 app.delete("/tasks/:id", (req, res) => {
   const id = Number(req.params.id);
-  const index = tasks.findIndex((t) => t.id === id);
 
-  if (index === -1) {
+  if (!deleteTask(id)) {
     return res.status(404).json({ error: `Task ${id} not found` });
   }
-
-  tasks.splice(index, 1);
 
   res.status(204).send();
 });

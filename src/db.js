@@ -48,4 +48,35 @@ function createTask(title) {
   return getTaskById(result.lastInsertRowid);
 }
 
-module.exports = { getAllTasks, getTaskById, createTask };
+function updateTask(id, { title, done }) {
+  const sets = [];
+  const values = [];
+
+  if (title !== undefined) {
+    sets.push("title = ?");
+    values.push(title);
+  }
+
+  if (done !== undefined) {
+    sets.push("done = ?");
+    values.push(done ? 1 : 0);
+  }
+
+  values.push(id);
+  db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+
+  return getTaskById(id);
+}
+
+function deleteTask(id) {
+  const result = db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
+module.exports = {
+  getAllTasks,
+  getTaskById,
+  createTask,
+  updateTask,
+  deleteTask,
+};
