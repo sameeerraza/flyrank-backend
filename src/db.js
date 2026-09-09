@@ -23,4 +23,21 @@ if (count === 0) {
   insert.run("Call the dentist", 0);
 }
 
-module.exports = db;
+function toTask(row) {
+  return { ...row, done: !!row.done };
+}
+
+function getAllTasks() {
+  const rows = db.prepare("SELECT id, title, done FROM tasks").all();
+  return rows.map(toTask);
+}
+
+function getTaskById(id) {
+  const row = db
+    .prepare("SELECT id, title, done FROM tasks WHERE id = ?")
+    .get(id);
+
+  return row ? toTask(row) : undefined;
+}
+
+module.exports = { getAllTasks, getTaskById };
