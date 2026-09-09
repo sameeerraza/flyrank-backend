@@ -9,6 +9,8 @@ const tasks = [
   { id: 3, title: "Call the dentist", done: false },
 ];
 
+app.use(express.json());
+
 app.get("/", (req, res) => {
   res.json({ name: "Task API", version: "1.0", endpoints: ["/tasks"] });
 });
@@ -30,6 +32,22 @@ app.get("/tasks/:id", (req, res) => {
   }
 
   res.json(task);
+});
+
+app.post("/tasks", (req, res) => {
+  const { title } = req.body;
+
+  if (typeof title !== "string" || title.trim() === "") {
+    return res.status(400).json({ error: "Title is required" });
+  }
+
+  const newId =
+    tasks.length === 0 ? 1 : Math.max(...tasks.map((t) => t.id)) + 1;
+
+  const newTask = { id: newId, title: title.trim(), done: false };
+  tasks.push(newTask);
+
+  res.status(201).json(newTask);
 });
 
 app.listen(PORT, () => {
