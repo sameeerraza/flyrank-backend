@@ -42,19 +42,37 @@ async function getTaskById(id) {
   return rows[0];
 }
 
-// --- Stage 3: still broken on purpose. createTask, updateTask and
-// deleteTask will be ported to real SQL queries in Stage 3. ---
+// --- Stage 3: write operations. Every statement uses RETURNING so the
+// updated row comes back in the same round trip — no follow-up SELECT
+// like the SQLite version needed. ---
 
-function createTask(title) {
-  throw new Error("createTask not implemented yet (Stage 2)");
+async function createTask(title) {
+  const { rows } = await pool.query(
+    "INSERT INTO tasks (title, done) VALUES ($1, false) RETURNING id, title, done",
+    [title]
+  );
+  return rows[0];
 }
 
-function updateTask(id, fields) {
-  throw new Error("updateTask not implemented yet (Stage 3)");
+// The route passes { title, done } with either key possibly undefined.
+// pg sends undefined as NULL, and COALESCE($n, col) keeps the existing
+// value when the argument is NULL. Safe here because both columns are
+// NOT NULL, so a real NULL is never a valid target.
+async function updateTask(id, { title, done }) {
+  const { rows } = await pool.query(
+    `UPDATE tasks
+        SET title = COALESCE($1, title),
+            done  = COALESCE($2, done)
+      WHERE id = $3
+      RETURNING id, title, done`,
+    [title ?? null, done ?? null, id]
+  );
+  return rows[0];
 }
 
-function deleteTask(id) {
-  throw new Error("deleteTask not implemented yet (Stage 3)");
+async function deleteTask(id) {
+  const result = await pool.query("DELETE FROM tasks WHERE id = $1", [id]);
+  return result.rowCount > 0;
 }
 
 module.exports = {
