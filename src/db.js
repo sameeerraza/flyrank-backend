@@ -24,16 +24,26 @@ async function init() {
   }
 }
 
-// --- CRUD: still broken on purpose. Stage 2 (create/read) and Stage 3
-// (update/delete) will port these to real SQL queries. ---
+// --- Stage 2: read operations on real SQL. No toTask helper — Postgres
+// returns `done` as a real boolean already. ---
 
-function getAllTasks() {
-  throw new Error("getAllTasks not implemented yet (Stage 2)");
+async function getAllTasks() {
+  const { rows } = await pool.query(
+    "SELECT id, title, done FROM tasks ORDER BY id"
+  );
+  return rows;
 }
 
-function getTaskById(id) {
-  throw new Error("getTaskById not implemented yet (Stage 2)");
+async function getTaskById(id) {
+  const { rows } = await pool.query(
+    "SELECT id, title, done FROM tasks WHERE id = $1",
+    [id]
+  );
+  return rows[0];
 }
+
+// --- Stage 3: still broken on purpose. createTask, updateTask and
+// deleteTask will be ported to real SQL queries in Stage 3. ---
 
 function createTask(title) {
   throw new Error("createTask not implemented yet (Stage 2)");

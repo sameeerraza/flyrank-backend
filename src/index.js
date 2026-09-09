@@ -24,13 +24,18 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-app.get("/tasks", (req, res) => {
-  res.json(getAllTasks());
+app.get("/tasks", async (req, res) => {
+  res.json(await getAllTasks());
 });
 
-app.get("/tasks/:id", (req, res) => {
+app.get("/tasks/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const task = getTaskById(id);
+
+  if (Number.isNaN(id)) {
+    return res.status(404).json({ error: `Task ${req.params.id} not found` });
+  }
+
+  const task = await getTaskById(id);
 
   if (!task) {
     return res.status(404).json({ error: `Task ${id} not found` });
@@ -39,21 +44,26 @@ app.get("/tasks/:id", (req, res) => {
   res.json(task);
 });
 
-app.post("/tasks", (req, res) => {
+app.post("/tasks", async (req, res) => {
   const { title } = req.body;
 
   if (typeof title !== "string" || title.trim() === "") {
     return res.status(400).json({ error: "Title is required" });
   }
 
-  const newTask = createTask(title.trim());
+  const newTask = await createTask(title.trim());
 
   res.status(201).json(newTask);
 });
 
-app.put("/tasks/:id", (req, res) => {
+app.put("/tasks/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const task = getTaskById(id);
+
+  if (Number.isNaN(id)) {
+    return res.status(404).json({ error: `Task ${req.params.id} not found` });
+  }
+
+  const task = await getTaskById(id);
 
   if (!task) {
     return res.status(404).json({ error: `Task ${id} not found` });
@@ -73,7 +83,7 @@ app.put("/tasks/:id", (req, res) => {
     return res.status(400).json({ error: "Done must be a boolean" });
   }
 
-  const updatedTask = updateTask(id, {
+  const updatedTask = await updateTask(id, {
     title: title !== undefined ? title.trim() : undefined,
     done,
   });
@@ -81,10 +91,14 @@ app.put("/tasks/:id", (req, res) => {
   res.status(200).json(updatedTask);
 });
 
-app.delete("/tasks/:id", (req, res) => {
+app.delete("/tasks/:id", async (req, res) => {
   const id = Number(req.params.id);
 
-  if (!deleteTask(id)) {
+  if (Number.isNaN(id)) {
+    return res.status(404).json({ error: `Task ${req.params.id} not found` });
+  }
+
+  if (!(await deleteTask(id))) {
     return res.status(404).json({ error: `Task ${id} not found` });
   }
 
