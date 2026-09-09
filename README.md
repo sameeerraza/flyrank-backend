@@ -85,9 +85,9 @@ SELECT * FROM tasks WHERE done = 1;
 |----|---------------|------|
 | 2  | Finish report | 1    |
 
-![Browsing the tasks table](docs/database.png)
+![Browsing the tasks table](docs/database.PNG)
 
-![Running a SELECT query](docs/sql-query.png)
+![Running a SELECT query](docs/sql-query.PNG)
 
 ## Example request
 
