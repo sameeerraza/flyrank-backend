@@ -1,6 +1,14 @@
 const { Pool } = require("pg");
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// idleTimeoutMillis: the pool keeps connections open between requests. If
+// the database restarts, those are dead sockets the pool doesn't know
+// about, and the next query hangs waiting on one. Closing idle
+// connections keeps the pool from handing out corpses.
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+});
 
 // Stage 1: create the table if it's missing, then seed 3 example tasks
 // only when the table is completely empty.
