@@ -1,4 +1,6 @@
 const express = require("express");
+const swaggerUi = require("swagger-ui-express");
+const openapiSpec = require("../openapi.json");
 
 const app = express();
 const PORT = 3000;
@@ -10,6 +12,7 @@ const tasks = [
 ];
 
 app.use(express.json());
+app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec));
 
 app.get("/", (req, res) => {
   res.json({ name: "Task API", version: "1.0", endpoints: ["/tasks"] });
