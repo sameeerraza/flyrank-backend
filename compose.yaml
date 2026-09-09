@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: tasks
+    ports:
+      - "5432:5432"
+    volumes:
+      - taskdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d tasks"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    restart: unless-stopped
+    environment:
+      # host is "db" (the service name on the compose network), not localhost
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/tasks
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  taskdata:
