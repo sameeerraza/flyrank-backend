@@ -20,6 +20,23 @@ The server starts on http://localhost:3000
 The endpoint table below is unchanged from the in-memory version. Only
 the storage layer was replaced.
 
+## Running the database
+
+Postgres runs in a container, not as a local install:
+
+```bash
+docker run --name taskdb -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=tasks \
+  -p 5432:5432 -v taskdata:/var/lib/postgresql/data -d postgres:17
+```
+
+The `taskdata` named volume is what keeps rows alive when the container
+is removed and recreated.
+
+The image is pinned to `postgres:17`. Postgres 18 moved the data directory
+inside the official image, so this mount path fails against `postgres:latest`.
+
+The app is not connected to this database yet.
+
 ## Endpoints
 
 | Method | Path | Description | Success | Errors |
