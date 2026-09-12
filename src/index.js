@@ -1,6 +1,7 @@
 const express = require("express");
 const swaggerUi = require("swagger-ui-express");
 const openapiSpec = require("../openapi.json");
+const { checkSupabase } = require("./supabase");
 const {
   init,
   getAllTasks,
@@ -11,7 +12,7 @@ const {
 } = require("./db");
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec));
@@ -114,13 +115,14 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
-init()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Server listening on http://localhost:${PORT}`);
+Promise.all([init(), checkSupabase()])
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log("Server running and connected to Supabase");
+        console.log(`Listening on http://localhost:${PORT}`);
+      });
+    })
+    .catch((err) => {
+      console.error("Startup failed:", err);
+      process.exit(1);
     });
-  })
-  .catch((err) => {
-    console.error("Failed to initialize database:", err);
-    process.exit(1);
-  });
