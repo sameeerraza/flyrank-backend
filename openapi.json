@@ -70,6 +70,23 @@
         }
       }
     },
+    "/public/info": {
+      "get": {
+        "summary": "Public, open info — no auth required",
+        "responses": {
+          "200": { "description": "Public message" }
+        }
+      }
+    },
+    "/protected/profile": {
+      "get": {
+        "summary": "Read private profile data (bearer token required)",
+        "responses": {
+          "200": { "description": "Profile data" },
+          "401": { "description": "Missing, malformed, or invalid access token" }
+        }
+      }
+    },
     "/tasks": {
       "get": {
         "summary": "List all tasks",
