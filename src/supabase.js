@@ -21,4 +21,22 @@ async function checkSupabase() {
   }
 }
 
-module.exports = { supabase, checkSupabase };
+// supabase.auth.signOut() acts on whatever session the shared client last
+// stored in memory, not on any particular request's token — unsafe with one
+// client shared across concurrent users. Log out the exact token the caller
+// sent by hitting GoTrue's logout endpoint directly instead.
+async function signOutUser(token) {
+  const res = await fetch(`${url}/auth/v1/logout?scope=global`, {
+    method: "POST",
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Logout failed with status ${res.status}`);
+  }
+}
+
+module.exports = { supabase, checkSupabase, signOutUser };

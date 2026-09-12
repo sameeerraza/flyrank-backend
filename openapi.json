@@ -87,6 +87,24 @@
         }
       }
     },
+    "/protected/dashboard": {
+      "get": {
+        "summary": "Example second protected route reusing the same auth guard",
+        "responses": {
+          "200": { "description": "Dashboard message" },
+          "401": { "description": "Missing, malformed, or invalid access token" }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "summary": "End the user's session (bearer token required)",
+        "responses": {
+          "204": { "description": "Logged out" },
+          "401": { "description": "Missing, malformed, or invalid access token" }
+        }
+      }
+    },
     "/tasks": {
       "get": {
         "summary": "List all tasks",
