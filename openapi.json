@@ -81,6 +81,7 @@
     "/protected/profile": {
       "get": {
         "summary": "Read private profile data (bearer token required)",
+        "security": [{ "bearerAuth": [] }],
         "responses": {
           "200": { "description": "Profile data" },
           "401": { "description": "Missing, malformed, or invalid access token" }
@@ -90,6 +91,7 @@
     "/protected/dashboard": {
       "get": {
         "summary": "Example second protected route reusing the same auth guard",
+        "security": [{ "bearerAuth": [] }],
         "responses": {
           "200": { "description": "Dashboard message" },
           "401": { "description": "Missing, malformed, or invalid access token" }
@@ -99,6 +101,7 @@
     "/auth/logout": {
       "post": {
         "summary": "End the user's session (bearer token required)",
+        "security": [{ "bearerAuth": [] }],
         "responses": {
           "204": { "description": "Logged out" },
           "401": { "description": "Missing, malformed, or invalid access token" }
@@ -194,6 +197,15 @@
           "204": { "description": "Task deleted" },
           "404": { "description": "Task not found" }
         }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
       }
     }
   }
