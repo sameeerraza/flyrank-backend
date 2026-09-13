@@ -11,15 +11,16 @@ built-in file system for output. No database, no proxy, no cloud account, no car
 
 ## Status
 
-Stage 2 of 7 — the three catalogue pages are walked by following the site's own
-"next" link, and all 60 book URLs are discovered. No book page is opened yet.
+Stage 3 of 7 — all 60 book pages are fetched and turned into raw records, each
+carrying its eight keys and its provenance. Nothing is normalized or validated
+yet: `price_text` is still `"£51.77"`, not a number.
 
 | Stage | What | Done |
 | --- | --- | --- |
 | 0 | Check before you collect | ✅ |
 | 1 | Fetch once, cache once | ✅ |
 | 2 | Find all three pages | ✅ |
-| 3 | Extract the raw records | ⬜ |
+| 3 | Extract the raw records | ✅ |
 | 4 | Clean it, check it, store it | ⬜ |
 | 5 | One bad page must not kill the run | ⬜ |
 | 6 | Publish the evidence | ⬜ |
@@ -43,28 +44,48 @@ The first run asks the site; every run after that reads the saved copy. Delete
 `cache/` to force a real fetch again.
 
 ```
-$ node src/index.js                      $ node src/index.js
-FETCH  …/catalogue/page-1.html           CACHE HIT  …/catalogue/page-1.html
-  50469 bytes  ·  20 books                 50469 bytes  ·  20 books
-FETCH  …/catalogue/page-2.html           CACHE HIT  …/catalogue/page-2.html
-  50877 bytes  ·  20 books                 50877 bytes  ·  20 books
-FETCH  …/catalogue/page-3.html           CACHE HIT  …/catalogue/page-3.html
-  51374 bytes  ·  20 books                 51374 bytes  ·  20 books
+$ node src/index.js
+FETCH  https://books.toscrape.com/catalogue/page-1.html
+  50469 bytes  ·  20 books
+FETCH  https://books.toscrape.com/catalogue/page-2.html
+  50877 bytes  ·  20 books
+FETCH  https://books.toscrape.com/catalogue/page-3.html
+  51374 bytes  ·  20 books
 
-catalogue_pages=3                        catalogue_pages=3
-discovered=60                            discovered=60
-unique_urls=60                           unique_urls=60
-skipped_links=0                          skipped_links=0
-next_rejected=0                          next_rejected=0
-cache_hits=0/3                           cache_hits=3/3
+catalogue_pages=3
+discovered=60
+unique_urls=60
+skipped_links=0
+next_rejected=0
 
-real 2.67s                               real 0.26s
+  [ 1/60] fetch  A Light in the Attic
+  [ 2/60] fetch  Tipping the Velvet
+  …
+  [60/60] fetch  The Natural History of Us (The Fine Art of Pretending #2)
+
+sample record:
+{
+  "title": "A Light in the Attic",
+  "product_url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+  "price_text": "£51.77",
+  "availability_text": "In stock (22 available)",
+  "rating_text": "Three",
+  "description": "It's hard to imagine a world without A Light in the Attic. …",
+  "source_page": "https://books.toscrape.com/catalogue/page-1.html",
+  "fetched_at": "2026-09-13T11:15:53.842Z"
+}
+
+detail_pages=60
+null_descriptions=0
+cache_hits=0/60
 ```
 
-Same numbers both times. The runs report sizes and counts rather than markup —
-sixty pages of HTML in a terminal helps nobody. The ten-fold difference in wall
-time is the politeness delay: it sits on the network path, so the cold run pays
-500 ms between pages and the warm run pays nothing.
+A second run prints the same numbers with `cache_hits=60/60` and every line
+reading `cache` instead of `fetch`. The difference in wall time is the whole
+point of the cache and the delay: **43.6 s cold, 0.9 s warm**. The delay sits on
+the network path, so the cold run pays 500 ms per page and the warm run pays
+nothing. Neither run dumps HTML — sixty pages of markup in a terminal helps
+nobody.
 
 ## Test it
 
@@ -72,7 +93,7 @@ time is the politeness delay: it sits on the network path, so the cold run pays
 npm test
 ```
 
-Twenty-one tests. The politeness rules: the user-agent that actually reaches the
+Thirty-four tests. The politeness rules: the user-agent that actually reaches the
 wire, the timeout, each status code and whether it is worth retrying, cache naming,
 and the fetch-once/read-from-disk behaviour with its `fetchedAt`. The crawl:
 relative URLs resolved against their page, the selector staying inside the product
@@ -80,7 +101,11 @@ area, links that leave the origin being refused — including an `http` downgrad
 a `javascript:` URL — unusable hrefs being counted rather than dropped, a refused
 "next" link being reported rather than passing for the end of the catalogue, the
 walk following `next` and then stopping, duplicates counted once, and a second walk
-reporting the same numbers off the cache.
+reporting the same numbers off the cache. The parser: all eight keys present, a
+missing description as `null` rather than `""`, a rating read from its class name,
+a non-rating class refused, selectors ignoring a sidebar and a recommendations
+strip that both carry a heading and a price, and a page with no product article
+failing loudly instead of yielding eight nulls.
 
 They run against a throwaway local server and finish in well under a second —
 nothing here touches books.toscrape.com, because testing failure by hammering the
@@ -93,9 +118,40 @@ real site is the one thing this assignment tells you not to do.
 | `src/config.js` | The target and the politeness numbers. No side effects, so any module can require it. |
 | `src/fetcher.js` | The only file that touches the network: user-agent, timeout, status check, delay, cache. |
 | `src/discover.js` | Stage 2's crawl: walks the catalogue by its own "next" link and collects book URLs. |
+| `src/extract.js` | Stage 3's parser: HTML in, one record out. Touches no network, so its tests are pure fixtures. |
+| `src/collect.js` | The only place fetch and parse meet: opens each book page and hands the HTML to the parser. |
 | `src/index.js` | Entry point. Wires the stages together and prints the run. |
 | `package.json` | The scraper's own dependencies, kept out of the Task API's manifest at the repo root. |
 | `test/` | Politeness rules checked against a local server, never against the sandbox. |
+
+## What the pages actually contain
+
+Two findings from the 60 pages in scope, both for Stage 4 to deal with rather than
+Stage 3 — a raw record is meant to record what was on the page, not improve it.
+
+- **Descriptions arrive doubled.** The site's own `<p>` holds a truncated teaser,
+  then the full text, then a literal `...more`: *"…laugh and smile and love th
+  It's hard to imagine a world without…"*. That is one paragraph in the source,
+  not a selector picking up two elements. 59 of the 60 end in `...more`.
+
+  We record it as it was. Stage 4 will add a separate `description_clean`
+  alongside it, the same way `price_gbp` sits alongside `price_text` — the raw
+  value and the clean value live side by side, and the cleanup never overwrites
+  the evidence. Only the `...more` suffix is worth stripping there: it is exactly
+  deterministic. Removing the repeated teaser would take a heuristic, and a
+  heuristic will one day cut real prose, which is the same sin as inventing text
+  that was not on the page. Keeping the raw field is also what makes it possible
+  to go back and compare against the page when a description looks wrong three
+  weeks from now, instead of trusting our own cleanup.
+- **Every book in scope has a description.** So `null_descriptions=0` is honest,
+  and the `null` path is proven by fixtures instead — a book page with no
+  description, one with an empty paragraph, and one with no description section
+  at all.
+- **Whitespace is treated differently per field, on purpose.**
+  `availability_text` is collapsed to a single line, because the whitespace around
+  *"In stock (22 available)"* is markup indentation and nothing more. A
+  description is only trimmed: line breaks inside prose are part of what the page
+  said, and flattening them would be an edit rather than a read.
 
 ## Known limitation
 
