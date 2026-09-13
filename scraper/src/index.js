@@ -2,16 +2,30 @@
 // Entry point only. Config lives in config.js, so requiring settings from another
 // module never runs the scraper as a side effect.
 
-const path = require("node:path");
-const { TARGET } = require("./config");
-const { fetchWithCache } = require("./fetcher");
+const { discoverBooks } = require("./discover");
+
+function reportPage({ pageUrl, fromCache, bytes, found, skipped, nextRejected }) {
+  // The size and the count, not the HTML. Sixty pages of markup in a terminal
+  // helps nobody.
+  console.log(`${fromCache ? "CACHE HIT" : "FETCH"}  ${pageUrl}`);
+  const note = skipped ? `  ·  ${skipped} link(s) skipped` : "";
+  console.log(`  ${bytes} bytes  ·  ${found} books${note}`);
+  if (nextRejected) {
+    console.log(`  next link pointed out of scope — walk ends here`);
+  }
+}
 
 async function main() {
-  const { fromCache, bytes, cachePath } = await fetchWithCache(TARGET.startUrl);
+  const { cataloguePages, discovered, skipped, nextRejected, uniqueUrls, cacheHits } =
+    await discoverBooks({ onPage: reportPage });
 
-  // The size, not the HTML. Sixty pages of markup in a terminal helps nobody.
-  console.log(`${fromCache ? "CACHE HIT" : "FETCH"}  ${TARGET.startUrl}`);
-  console.log(`  ${bytes} bytes  →  ${path.relative(process.cwd(), cachePath)}`);
+  console.log("");
+  console.log(`catalogue_pages=${cataloguePages}`);
+  console.log(`discovered=${discovered}`);
+  console.log(`unique_urls=${uniqueUrls}`);
+  console.log(`skipped_links=${skipped}`);
+  console.log(`next_rejected=${nextRejected}`);
+  console.log(`cache_hits=${cacheHits}/${cataloguePages}`);
 }
 
 main().catch((err) => {

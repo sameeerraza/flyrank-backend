@@ -11,14 +11,14 @@ built-in file system for output. No database, no proxy, no cloud account, no car
 
 ## Status
 
-Stage 1 of 7 — the first catalogue page is fetched once and served from the cache
-after that.
+Stage 2 of 7 — the three catalogue pages are walked by following the site's own
+"next" link, and all 60 book URLs are discovered. No book page is opened yet.
 
 | Stage | What | Done |
 | --- | --- | --- |
 | 0 | Check before you collect | ✅ |
 | 1 | Fetch once, cache once | ✅ |
-| 2 | Find all three pages | ⬜ |
+| 2 | Find all three pages | ✅ |
 | 3 | Extract the raw records | ⬜ |
 | 4 | Clean it, check it, store it | ⬜ |
 | 5 | One bad page must not kill the run | ⬜ |
@@ -43,17 +43,28 @@ The first run asks the site; every run after that reads the saved copy. Delete
 `cache/` to force a real fetch again.
 
 ```
-$ node src/index.js
-FETCH  https://books.toscrape.com/catalogue/page-1.html
-  50469 bytes  →  cache/catalogue-page-1.html
+$ node src/index.js                      $ node src/index.js
+FETCH  …/catalogue/page-1.html           CACHE HIT  …/catalogue/page-1.html
+  50469 bytes  ·  20 books                 50469 bytes  ·  20 books
+FETCH  …/catalogue/page-2.html           CACHE HIT  …/catalogue/page-2.html
+  50877 bytes  ·  20 books                 50877 bytes  ·  20 books
+FETCH  …/catalogue/page-3.html           CACHE HIT  …/catalogue/page-3.html
+  51374 bytes  ·  20 books                 51374 bytes  ·  20 books
 
-$ node src/index.js
-CACHE HIT  https://books.toscrape.com/catalogue/page-1.html
-  50469 bytes  →  cache/catalogue-page-1.html
+catalogue_pages=3                        catalogue_pages=3
+discovered=60                            discovered=60
+unique_urls=60                           unique_urls=60
+skipped_links=0                          skipped_links=0
+next_rejected=0                          next_rejected=0
+cache_hits=0/3                           cache_hits=3/3
+
+real 2.67s                               real 0.26s
 ```
 
-Both runs report the size rather than the markup — sixty pages of HTML in a
-terminal helps nobody.
+Same numbers both times. The runs report sizes and counts rather than markup —
+sixty pages of HTML in a terminal helps nobody. The ten-fold difference in wall
+time is the politeness delay: it sits on the network path, so the cold run pays
+500 ms between pages and the warm run pays nothing.
 
 ## Test it
 
@@ -61,12 +72,19 @@ terminal helps nobody.
 npm test
 ```
 
-Eight tests covering the politeness rules: the user-agent that actually reaches the
+Twenty-one tests. The politeness rules: the user-agent that actually reaches the
 wire, the timeout, each status code and whether it is worth retrying, cache naming,
-and the fetch-once/read-from-disk behaviour with its `fetchedAt`. They run against a
-throwaway local server and finish in well under a second — nothing here touches
-books.toscrape.com, because testing failure by hammering the real site is the one
-thing this assignment tells you not to do.
+and the fetch-once/read-from-disk behaviour with its `fetchedAt`. The crawl:
+relative URLs resolved against their page, the selector staying inside the product
+area, links that leave the origin being refused — including an `http` downgrade and
+a `javascript:` URL — unusable hrefs being counted rather than dropped, a refused
+"next" link being reported rather than passing for the end of the catalogue, the
+walk following `next` and then stopping, duplicates counted once, and a second walk
+reporting the same numbers off the cache.
+
+They run against a throwaway local server and finish in well under a second —
+nothing here touches books.toscrape.com, because testing failure by hammering the
+real site is the one thing this assignment tells you not to do.
 
 ## Layout
 
@@ -74,6 +92,7 @@ thing this assignment tells you not to do.
 | --- | --- |
 | `src/config.js` | The target and the politeness numbers. No side effects, so any module can require it. |
 | `src/fetcher.js` | The only file that touches the network: user-agent, timeout, status check, delay, cache. |
+| `src/discover.js` | Stage 2's crawl: walks the catalogue by its own "next" link and collects book URLs. |
 | `src/index.js` | Entry point. Wires the stages together and prints the run. |
 | `package.json` | The scraper's own dependencies, kept out of the Task API's manifest at the repo root. |
 | `test/` | Politeness rules checked against a local server, never against the sandbox. |
@@ -106,6 +125,13 @@ hardcoding the book URLs. The site paginates at a maximum of 20 items per page, 
 three pages is **60 book detail pages**, out of the 1000 books it holds. One pass,
 with every response cached locally so development re-reads the saved copy instead of
 asking the site again.
+
+That scope is enforced in code, not just promised here: a link resolving to any
+other **origin** — different host, or the same host over plain `http` — is refused
+and counted, so the crawler cannot wander off `https://books.toscrape.com` even if
+a page one day points somewhere else. A "next" link that gets refused is counted
+separately, because a crawl cut short should never be mistaken for a short
+catalogue.
 
 **What data.** Per book, eight fields lifted from the public product page:
 `title`, `product_url`, `price_text`, `availability_text`, `rating_text`,
