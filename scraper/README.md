@@ -11,12 +11,13 @@ built-in file system for output. No database, no proxy, no cloud account, no car
 
 ## Status
 
-Stage 0 of 7 — target classified. Nothing is scraped yet; the entry file is a stub.
+Stage 1 of 7 — the first catalogue page is fetched once and served from the cache
+after that.
 
 | Stage | What | Done |
 | --- | --- | --- |
 | 0 | Check before you collect | ✅ |
-| 1 | Fetch once, cache once | ⬜ |
+| 1 | Fetch once, cache once | ✅ |
 | 2 | Find all three pages | ⬜ |
 | 3 | Extract the raw records | ⬜ |
 | 4 | Clean it, check it, store it | ⬜ |
@@ -25,11 +26,67 @@ Stage 0 of 7 — target classified. Nothing is scraped yet; the entry file is a 
 
 ## Run it
 
+From a fresh clone of the repo:
+
 ```bash
+cd scraper
+npm install
 node src/index.js
 ```
 
-No dependencies yet — Stage 2 is the first stage that needs one.
+Needs Node.js 20+ — the scraper uses the built-in `fetch` and `AbortSignal.timeout`.
+It is its own npm package, separate from the Task API at the repo root: `cheerio`
+(Stage 2) and `zod` (Stage 4) belong to the scraper and are declared here, not in
+the API's manifest. Stage 1 itself runs on built-ins alone.
+
+The first run asks the site; every run after that reads the saved copy. Delete
+`cache/` to force a real fetch again.
+
+```
+$ node src/index.js
+FETCH  https://books.toscrape.com/catalogue/page-1.html
+  50469 bytes  →  cache/catalogue-page-1.html
+
+$ node src/index.js
+CACHE HIT  https://books.toscrape.com/catalogue/page-1.html
+  50469 bytes  →  cache/catalogue-page-1.html
+```
+
+Both runs report the size rather than the markup — sixty pages of HTML in a
+terminal helps nobody.
+
+## Test it
+
+```bash
+npm test
+```
+
+Eight tests covering the politeness rules: the user-agent that actually reaches the
+wire, the timeout, each status code and whether it is worth retrying, cache naming,
+and the fetch-once/read-from-disk behaviour with its `fetchedAt`. They run against a
+throwaway local server and finish in well under a second — nothing here touches
+books.toscrape.com, because testing failure by hammering the real site is the one
+thing this assignment tells you not to do.
+
+## Layout
+
+| File | Responsibility |
+| --- | --- |
+| `src/config.js` | The target and the politeness numbers. No side effects, so any module can require it. |
+| `src/fetcher.js` | The only file that touches the network: user-agent, timeout, status check, delay, cache. |
+| `src/index.js` | Entry point. Wires the stages together and prints the run. |
+| `package.json` | The scraper's own dependencies, kept out of the Task API's manifest at the repo root. |
+| `test/` | Politeness rules checked against a local server, never against the sandbox. |
+
+## Known limitation
+
+The request delay is a process-wide throttle that assumes requests happen one at a
+time — which they do, through Stage 5. It reads the time of the last request,
+waits out the remainder, and stamps the clock afterwards. Two fetches running
+concurrently would both read that timestamp before either updated it, compute the
+same debt, and fire together: the 500 ms promise would break silently, with no
+error to notice it. Adding concurrency — the queued-jobs stretch goal — means
+putting a mutex around that read-wait-stamp sequence first.
 
 ## Target classification
 
@@ -63,18 +120,22 @@ browsing the catalogue by hand.
 
 ## Politeness rules
 
-These apply to every request that actually leaves this machine. Cached reads are not
-requests and need none of it.
+All five live in `src/fetcher.js`, on the path a request takes to the network.
+Cached reads never reach that path, so they are never delayed and never counted.
 
 - **User-agent:** `FlyRankInternship-A9/1.0 (+https://github.com/sameeerraza/flyrank-backend)`
   — an honest name and a link, so a site owner reading their logs can find out who
   this is.
-- **Timeout:** every request gives up after a few seconds rather than hanging.
-- **Status check:** only `200` is a page. Anything else is a failed fetch, not HTML
-  to parse.
-- **Delay:** at least 500 ms between real requests.
-- **Cache:** the first fetch of a URL is saved under `cache/` and re-read from there
-  for the rest of development. The site should feel one run, not fifty.
+- **Timeout:** 10 s, via `AbortSignal.timeout`. A request gives up rather than
+  hanging.
+- **Status check:** only `200` is a page, checked before anything reads the body.
+  Anything else raises a `FetchError` carrying its `status` and whether it is worth
+  retrying — a 404 or 403 never is, a timeout or 5xx is.
+- **Delay:** at least 500 ms of quiet between one response and the next request,
+  process-wide. The first request waits for nothing.
+- **Cache:** the first fetch of a URL is saved under `cache/`, named after its path
+  (`/catalogue/page-1.html` → `catalogue-page-1.html`), and re-read from there for
+  the rest of development. The site should feel one run, not fifty.
 
 ## robots.txt
 
