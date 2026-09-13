@@ -16,5 +16,6 @@ const TARGET = {
 // Resolved against the project, not the shell's cwd, so the scraper behaves the
 // same whether it is run from scraper/ or from the repo root.
 const CACHE_DIR = path.resolve(__dirname, "..", "cache");
+const OUTPUT_DIR = path.resolve(__dirname, "..", "output");
 
-module.exports = { TARGET, CACHE_DIR };
+module.exports = { TARGET, CACHE_DIR, OUTPUT_DIR };

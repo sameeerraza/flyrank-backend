@@ -5,6 +5,7 @@
 
 const cheerio = require("cheerio");
 const { TARGET } = require("./config");
+const { canonicalize } = require("./canonical");
 const { fetchWithCache } = require("./fetcher");
 
 // Aimed at the product area, not the whole document. The catalogue page carries
@@ -105,14 +106,13 @@ async function discoverBooks({ startUrl, maxPages, onPage, fetchOptions } = {}) 
       // First page to mention a book owns it, so source_page stays stable across
       // runs even if the shop lists the same title twice.
       //
-      // Stage 4 note: this dedupes on the exact URL string, while Stage 4 calls
-      // product_url the record's canonical identity. Both should end up calling
-      // one shared canonicalize(url), or there will be two notions of identity
-      // that only disagree once some URL arrives with a fragment or a trailing
-      // slash.
-      if (seen.has(url)) continue;
-      seen.add(url);
-      books.push({ url, sourcePage: pageUrl });
+      // Deduped on the canonical URL — the same function Stage 4 uses as a
+      // record's identity, so the two can never drift into disagreeing about
+      // what "the same book" means.
+      const identity = canonicalize(url);
+      if (identity === null || seen.has(identity)) continue;
+      seen.add(identity);
+      books.push({ url: identity, sourcePage: pageUrl });
     }
 
     pages.push(pageUrl);

@@ -11,9 +11,9 @@ built-in file system for output. No database, no proxy, no cloud account, no car
 
 ## Status
 
-Stage 3 of 7 — all 60 book pages are fetched and turned into raw records, each
-carrying its eight keys and its provenance. Nothing is normalized or validated
-yet: `price_text` is still `"£51.77"`, not a number.
+Stage 4 of 7 — records are normalized, checked against a schema, and stored.
+`output/books.json` holds exactly 60 unique records and a rerun reproduces it
+byte for byte.
 
 | Stage | What | Done |
 | --- | --- | --- |
@@ -21,7 +21,7 @@ yet: `price_text` is still `"£51.77"`, not a number.
 | 1 | Fetch once, cache once | ✅ |
 | 2 | Find all three pages | ✅ |
 | 3 | Extract the raw records | ✅ |
-| 4 | Clean it, check it, store it | ⬜ |
+| 4 | Clean it, check it, store it | ✅ |
 | 5 | One bad page must not kill the run | ⬜ |
 | 6 | Publish the evidence | ⬜ |
 
@@ -63,21 +63,29 @@ next_rejected=0
   …
   [60/60] fetch  The Natural History of Us (The Fine Art of Pretending #2)
 
+detail_pages=60
+null_descriptions=0
+cache_hits=0/60
+
 sample record:
 {
   "title": "A Light in the Attic",
   "product_url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
   "price_text": "£51.77",
+  "price_gbp": 51.77,
   "availability_text": "In stock (22 available)",
   "rating_text": "Three",
-  "description": "It's hard to imagine a world without A Light in the Attic. …",
+  "description": "It's hard to imagine a world without A Light in the Attic. … ...more",
+  "description_clean": "It's hard to imagine a world without A Light in the Attic. …",
   "source_page": "https://books.toscrape.com/catalogue/page-1.html",
   "fetched_at": "2026-09-13T11:15:53.842Z"
 }
 
-detail_pages=60
-null_descriptions=0
-cache_hits=0/60
+valid_records=60
+invalid_records=0
+duplicates_dropped=0
+reconciled=true  (60 valid + 0 invalid + 0 duplicate = 60 of 60 discovered)
+stored → output/books.json  ·  output/errors.json
 ```
 
 A second run prints the same numbers with `cache_hits=60/60` and every line
@@ -93,7 +101,7 @@ nobody.
 npm test
 ```
 
-Thirty-four tests. The politeness rules: the user-agent that actually reaches the
+Sixty-three tests. The politeness rules: the user-agent that actually reaches the
 wire, the timeout, each status code and whether it is worth retrying, cache naming,
 and the fetch-once/read-from-disk behaviour with its `fetchedAt`. The crawl:
 relative URLs resolved against their page, the selector staying inside the product
@@ -105,7 +113,11 @@ reporting the same numbers off the cache. The parser: all eight keys present, a
 missing description as `null` rather than `""`, a rating read from its class name,
 a non-rating class refused, selectors ignoring a sidebar and a recommendations
 strip that both carry a heading and a price, and a page with no product article
-failing loudly instead of yielding eight nulls.
+failing loudly instead of yielding eight nulls. Normalization and storage: prices
+with trailing junk, a missing symbol, another currency or a thousands separator
+all refused rather than half-read, a fragment not making a second book, invalid
+records landing in `errors.json` with their reasons and never in `books.json`, and
+storing the same records twice producing byte-identical output.
 
 They run against a throwaway local server and finish in well under a second —
 nothing here touches books.toscrape.com, because testing failure by hammering the
@@ -120,9 +132,83 @@ real site is the one thing this assignment tells you not to do.
 | `src/discover.js` | Stage 2's crawl: walks the catalogue by its own "next" link and collects book URLs. |
 | `src/extract.js` | Stage 3's parser: HTML in, one record out. Touches no network, so its tests are pure fixtures. |
 | `src/collect.js` | The only place fetch and parse meet: opens each book page and hands the HTML to the parser. |
+| `src/canonical.js` | One definition of "the same book", shared by Stage 2's dedupe and Stage 4's identity. |
+| `src/normalize.js` | Raw strings to clean values: `price_text` → `price_gbp`, `...more` stripped. |
+| `src/schema.js` | The record shape, in Zod. What is required, what type, what may be null. |
+| `src/store.js` | Validates before writing, then writes `books.json` and `errors.json`. |
 | `src/index.js` | Entry point. Wires the stages together and prints the run. |
 | `package.json` | The scraper's own dependencies, kept out of the Task API's manifest at the repo root. |
 | `test/` | Politeness rules checked against a local server, never against the sandbox. |
+
+## The record
+
+Ten fields. Raw values and clean values live side by side — the page's own words
+are never overwritten by what we made of them.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `title` | string | Non-empty. |
+| `product_url` | string | The record's identity. Must be within `https://books.toscrape.com`. |
+| `price_text` | string | Exactly as printed: `"£51.77"`. |
+| `price_gbp` | number | Finite, not negative. |
+| `availability_text` | string | Collapsed to one line. |
+| `rating_text` | enum | One of One, Two, Three, Four, Five. Required — see below. |
+| `description` | string \| null | As it was on the page, `...more` and all. |
+| `description_clean` | string \| null | Only the `...more` suffix removed. |
+| `source_page` | string | The catalogue page this book was found on. |
+| `fetched_at` | string | ISO 8601. The cache file's timestamp, not the clock. |
+
+A record is checked against this **before** it is stored. Anything that fails goes
+to `output/errors.json` with the reasons and never appears in `books.json`.
+
+**Only `description` is optional.** The brief marks that one optional and is silent
+on the rest, so the rest being required is a decision worth naming. `rating_text`
+is the one people ask about: the parser yields `null` when the star-rating class is
+not one of the five words, and that does not mean a book has no rating — it means
+the page's structure changed. A record like that belongs in `errors.json` where
+someone will see it, not in `books.json` looking complete with one field quietly
+absent.
+
+**`product_url` and `source_page` must be within `https://books.toscrape.com`**,
+not merely `https://`. Discovery already refuses an off-origin link, so nothing
+off-origin can reach the schema today — but the schema is the last gate before a
+record is written, and a gate that trusts an earlier gate is not really a gate.
+
+`price_gbp` is parsed with a strict pattern rather than `parseFloat`, which reads
+`"£51.77 (was £60)"` as `51.77` and reports nothing — a partial read is worse than
+a refusal, because it looks like a price. A value that cannot be read becomes
+`null`, fails the schema, and lands in `errors.json` where you can see it. The
+currency symbol is required for the same reason: the number out of `"$51.77"` must
+never be copied into a field named `price_gbp`.
+
+### Idempotency
+
+Running twice produces the same 60 records, not 120 — and the proof is a diff, not
+a count:
+
+```bash
+node src/index.js
+cp output/books.json /tmp/run1.json
+node src/index.js
+diff /tmp/run1.json output/books.json   # empty
+```
+
+This holds because identity is the canonical URL, records keep discovery order,
+and `fetched_at` comes from the cache file rather than the clock. A matching count
+can still hide a timestamp that moved; an empty diff cannot.
+
+### The run checks its own arithmetic
+
+Every URL the crawl found has to end up somewhere nameable — stored, rejected with
+a reason, dropped as a duplicate, or (from Stage 5) failed outright:
+
+```
+reconciled=true  (60 valid + 0 invalid + 0 duplicate = 60 of 60 discovered)
+```
+
+If those never add up, a record went missing between the crawl and the file, and
+no individual count would look wrong. A report that is only a list of numbers
+cannot tell you when one of them is a lie; this one can.
 
 ## What the pages actually contain
 
@@ -134,15 +220,14 @@ Stage 3 — a raw record is meant to record what was on the page, not improve it
   It's hard to imagine a world without…"*. That is one paragraph in the source,
   not a selector picking up two elements. 59 of the 60 end in `...more`.
 
-  We record it as it was. Stage 4 will add a separate `description_clean`
-  alongside it, the same way `price_gbp` sits alongside `price_text` — the raw
-  value and the clean value live side by side, and the cleanup never overwrites
-  the evidence. Only the `...more` suffix is worth stripping there: it is exactly
-  deterministic. Removing the repeated teaser would take a heuristic, and a
-  heuristic will one day cut real prose, which is the same sin as inventing text
-  that was not on the page. Keeping the raw field is also what makes it possible
-  to go back and compare against the page when a description looks wrong three
-  weeks from now, instead of trusting our own cleanup.
+  We record it as it was. `description_clean` sits alongside it and strips only
+  the `...more` suffix, which is exact string surgery. **The repeated teaser is
+  left in place on purpose.** Removing it would take a heuristic — find the
+  repeat, guess where it ends — and a heuristic that is wrong once has cut real
+  prose out of a record, which is the same sin as inventing text that was never
+  on the page. Keeping the raw field is also what makes it possible to go back
+  and compare against the page when a description looks wrong three weeks from
+  now, instead of trusting our own cleanup.
 - **Every book in scope has a description.** So `null_descriptions=0` is honest,
   and the `null` path is proven by fixtures instead — a book page with no
   description, one with an empty paragraph, and one with no description section
