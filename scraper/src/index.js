@@ -3,10 +3,22 @@
 // module never runs the scraper as a side effect.
 
 const path = require("node:path");
-const { OUTPUT_DIR } = require("./config");
+const { TARGET, OUTPUT_DIR } = require("./config");
 const { discoverBooks } = require("./discover");
 const { collectBooks } = require("./collect");
-const { storeRecords, reconcile } = require("./store");
+const { storeRecords } = require("./store");
+const { buildReport, writeReport } = require("./report");
+
+// Stage 5's proof, run on demand: `node src/index.js --inject-failure` adds one
+// book URL that does not exist. Breaking things on our own side — never by
+// pointing the scraper at something real and hoping it fails.
+const INJECT_FAILURE = process.argv.includes("--inject-failure");
+// Root-relative, so it resolves against the origin rather than against the
+// catalogue directory the start URL happens to sit in.
+const FAKE_URL = new URL(
+  "/catalogue/this-book-does-not-exist_9999/index.html",
+  TARGET.startUrl,
+).href;
 
 function reportPage({ pageUrl, fromCache, bytes, found, skipped, nextRejected }) {
   // The size and the count, not the HTML. Sixty pages of markup in a terminal
@@ -19,14 +31,40 @@ function reportPage({ pageUrl, fromCache, bytes, found, skipped, nextRejected })
   }
 }
 
-function reportBook({ record, fromCache, index, total }) {
+function reportBook({ record, fromCache, attempts, index, total }) {
   const counter = String(index).padStart(String(total).length, " ");
-  const tag = fromCache ? "cache" : "fetch";
-  console.log(`  [${counter}/${total}] ${tag}  ${record.title ?? "(no title)"}`);
+  const retried = attempts > 1 ? `  (attempt ${attempts})` : "";
+  console.log(
+    `  [${counter}/${total}] ${fromCache ? "cache" : "fetch"}  ${record.title ?? "(no title)"}${retried}`,
+  );
+}
+
+function reportFailure({ failure, index, total }) {
+  const counter = String(index).padStart(String(total).length, " ");
+  console.log(
+    `  [${counter}/${total}] FAILED ${failure.kind}${failure.status ? ` ${failure.status}` : ""}` +
+      ` after ${failure.attempts} attempt(s)  ${failure.url}`,
+  );
 }
 
 async function main() {
+  const startedAt = new Date();
+
   const discovery = await discoverBooks({ onPage: reportPage });
+
+  if (INJECT_FAILURE) {
+    // Counted as discovered, so the reconciliation has to account for it — which
+    // is the point. A run that swallowed this URL would still print 60 valid
+    // records and look perfect.
+    discovery.books.push({
+      url: FAKE_URL,
+      sourcePage: discovery.pages[0] ?? TARGET.startUrl,
+    });
+    discovery.uniqueUrls += 1;
+    discovery.discovered += 1;
+    console.log("");
+    console.log(`injected one URL that does not exist: ${FAKE_URL}`);
+  }
 
   console.log("");
   console.log(`catalogue_pages=${discovery.cataloguePages}`);
@@ -36,58 +74,61 @@ async function main() {
   console.log(`next_rejected=${discovery.nextRejected}`);
   console.log("");
 
-  const { records, cacheHits } = await collectBooks({
+  const collection = await collectBooks({
     books: discovery.books,
     onBook: reportBook,
+    onFailure: reportFailure,
   });
 
-  const missingDescriptions = records.filter((r) => r.description === null).length;
+  const missingDescriptions = collection.records.filter(
+    (r) => r.description === null,
+  ).length;
 
   console.log("");
-  console.log(`detail_pages=${records.length}`);
+  console.log(`detail_pages=${collection.records.length}`);
+  console.log(`failed_pages=${collection.failures.length}`);
   console.log(`null_descriptions=${missingDescriptions}`);
-  console.log(`cache_hits=${cacheHits}/${records.length}`);
+  console.log(`cache_hits=${collection.cacheHits}/${discovery.books.length}`);
 
-  const { valid, invalid, duplicates, booksPath, errorsPath } =
-    await storeRecords(records, { outputDir: OUTPUT_DIR });
+  const storage = await storeRecords(collection.records, { outputDir: OUTPUT_DIR });
 
   console.log("");
   console.log("sample record:");
-  console.log(JSON.stringify(valid[0], null, 2));
+  console.log(JSON.stringify(storage.valid[0], null, 2));
 
-  if (invalid.length > 0) {
+  if (storage.invalid.length > 0) {
     console.log("");
     console.log("rejected:");
-    for (const entry of invalid.slice(0, 5)) {
+    for (const entry of storage.invalid.slice(0, 5)) {
       console.log(`  ${entry.product_url}`);
       for (const reason of entry.reasons) console.log(`    ${reason}`);
     }
   }
 
+  const finishedAt = new Date();
+  const report = buildReport({ startedAt, finishedAt, discovery, collection, storage });
+  const reportPath = await writeReport(report, { outputDir: OUTPUT_DIR });
+
   const rel = (p) => path.relative(process.cwd(), p);
 
   console.log("");
-  console.log(`valid_records=${valid.length}`);
-  console.log(`invalid_records=${invalid.length}`);
-  console.log(`duplicates_dropped=${duplicates}`);
-
-  // A report that is only a list of counts cannot tell you when one of them is
-  // wrong. This one checks itself.
-  const check = reconcile({
-    discovered: discovery.uniqueUrls,
-    valid: valid.length,
-    invalid: invalid.length,
-    duplicates,
-  });
+  console.log(`valid_records=${report.valid_records}`);
+  console.log(`invalid_records=${report.invalid_records}`);
+  console.log(`duplicates_dropped=${report.duplicates_dropped}`);
+  console.log(`failed_pages=${report.failed_pages}`);
   console.log(
-    `reconciled=${check.reconciled}  (${valid.length} valid + ${invalid.length} invalid` +
-      ` + ${duplicates} duplicate = ${check.accountedFor} of ${check.discovered} discovered)`,
+    `reconciled=${report.reconciled}  (${report.valid_records} valid + ${report.invalid_records} invalid` +
+      ` + ${report.duplicates_dropped} duplicate + ${report.failed_pages} failed` +
+      ` = ${report.valid_records + report.invalid_records + report.duplicates_dropped + report.failed_pages}` +
+      ` of ${report.unique_urls} discovered)`,
   );
-  if (!check.reconciled) {
-    console.error(`WARNING: ${check.missing} discovered URL(s) are unaccounted for`);
+  if (!report.reconciled) {
+    console.error(`WARNING: ${report.unaccounted_for} discovered URL(s) are unaccounted for`);
   }
 
-  console.log(`stored → ${rel(booksPath)}  ·  ${rel(errorsPath)}`);
+  console.log(
+    `stored → ${rel(storage.booksPath)}  ·  ${rel(storage.errorsPath)}  ·  ${rel(reportPath)}`,
+  );
 }
 
 main().catch((err) => {

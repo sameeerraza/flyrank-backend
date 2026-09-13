@@ -1,0 +1,32 @@
+{
+  "started_at": "2026-09-13T12:11:52.607Z",
+  "finished_at": "2026-09-13T12:11:54.295Z",
+  "duration_ms": 1688,
+  "catalogue_pages": 3,
+  "discovered": 61,
+  "unique_urls": 61,
+  "skipped_links": 0,
+  "next_rejected": 0,
+  "requests_sent": 1,
+  "cache_hits": 63,
+  "pages_stored": 60,
+  "valid_records": 60,
+  "invalid_records": 0,
+  "duplicates_dropped": 0,
+  "failed_pages": 1,
+  "failures_by_kind": {
+    "http": 1
+  },
+  "reconciled": true,
+  "unaccounted_for": 0,
+  "failures": [
+    {
+      "url": "https://books.toscrape.com/catalogue/this-book-does-not-exist_9999/index.html",
+      "source_page": "https://books.toscrape.com/catalogue/page-1.html",
+      "kind": "http",
+      "status": 404,
+      "attempts": 1,
+      "reason": "HTTP 404 Not Found — https://books.toscrape.com/catalogue/this-book-does-not-exist_9999/index.html"
+    }
+  ]
+}

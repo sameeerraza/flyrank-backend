@@ -11,9 +11,9 @@ built-in file system for output. No database, no proxy, no cloud account, no car
 
 ## Status
 
-Stage 4 of 7 — records are normalized, checked against a schema, and stored.
-`output/books.json` holds exactly 60 unique records and a rerun reproduces it
-byte for byte.
+Stage 5 of 7 — a broken page is logged and skipped instead of taking the run down,
+retryable failures get one more attempt, and every run ends by writing
+`output/run-report.json`.
 
 | Stage | What | Done |
 | --- | --- | --- |
@@ -22,7 +22,7 @@ byte for byte.
 | 2 | Find all three pages | ✅ |
 | 3 | Extract the raw records | ✅ |
 | 4 | Clean it, check it, store it | ✅ |
-| 5 | One bad page must not kill the run | ⬜ |
+| 5 | One bad page must not kill the run | ✅ |
 | 6 | Publish the evidence | ⬜ |
 
 ## Run it
@@ -84,8 +84,9 @@ sample record:
 valid_records=60
 invalid_records=0
 duplicates_dropped=0
-reconciled=true  (60 valid + 0 invalid + 0 duplicate = 60 of 60 discovered)
-stored → output/books.json  ·  output/errors.json
+failed_pages=0
+reconciled=true  (60 valid + 0 invalid + 0 duplicate + 0 failed = 60 of 60 discovered)
+stored → output/books.json  ·  output/errors.json  ·  output/run-report.json
 ```
 
 A second run prints the same numbers with `cache_hits=60/60` and every line
@@ -101,7 +102,7 @@ nobody.
 npm test
 ```
 
-Sixty-three tests. The politeness rules: the user-agent that actually reaches the
+Seventy-nine tests. The politeness rules: the user-agent that actually reaches the
 wire, the timeout, each status code and whether it is worth retrying, cache naming,
 and the fetch-once/read-from-disk behaviour with its `fetchedAt`. The crawl:
 relative URLs resolved against their page, the selector staying inside the product
@@ -117,7 +118,13 @@ failing loudly instead of yielding eight nulls. Normalization and storage: price
 with trailing junk, a missing symbol, another currency or a thousands separator
 all refused rather than half-read, a fragment not making a second book, invalid
 records landing in `errors.json` with their reasons and never in `books.json`, and
-storing the same records twice producing byte-identical output.
+storing the same records twice producing byte-identical output. Surviving failures:
+one broken page leaving the good records intact, a 404 and a 403 each requested
+exactly once, a 5xx retried once and recovering, a permanently failing page tried
+twice and no more, a page that downloads but does not parse counted as a parse
+failure and never re-requested, a cached page that fails to parse costing the site
+no request at all, a `Retry-After` inside the budget being waited out and one
+beyond it refusing to retry, and a report whose numbers fail to add up saying so.
 
 They run against a throwaway local server and finish in well under a second —
 nothing here touches books.toscrape.com, because testing failure by hammering the
@@ -136,6 +143,7 @@ real site is the one thing this assignment tells you not to do.
 | `src/normalize.js` | Raw strings to clean values: `price_text` → `price_gbp`, `...more` stripped. |
 | `src/schema.js` | The record shape, in Zod. What is required, what type, what may be null. |
 | `src/store.js` | Validates before writing, then writes `books.json` and `errors.json`. |
+| `src/report.js` | Builds `run-report.json`, including the check that the run's own numbers add up. |
 | `src/index.js` | Entry point. Wires the stages together and prints the run. |
 | `package.json` | The scraper's own dependencies, kept out of the Task API's manifest at the repo root. |
 | `test/` | Politeness rules checked against a local server, never against the sandbox. |
@@ -197,13 +205,120 @@ This holds because identity is the canonical URL, records keep discovery order,
 and `fetched_at` comes from the cache file rather than the clock. A matching count
 can still hide a timestamp that moved; an empty diff cannot.
 
+## When a page breaks
+
+One page is one page. A failure is caught per book, written down, and the loop
+carries on — fifty-nine good records survive one bad one.
+
+**Retry once, and only when the error says it is worth it.** The failure carries
+its own facts (`kind`, `status`, `retryable`), so the rule reads as
+`if (err.retryable)` rather than as a guess:
+
+| Failure | Retried? | Why |
+| --- | --- | --- |
+| timeout, network error | yes, once | It may well work the second time. |
+| `5xx`, `429` | yes, once | The server is struggling or asking for slower. |
+| `404` | **no** | The page does not exist; asking again will not create it. |
+| `403` | **no** | The site said no. Asking again is how a polite robot becomes a pest. |
+| parse failure | **no** | The HTML already arrived. Re-downloading it changes nothing. |
+
+The retry lives in `collect.js`, not in `fetcher.js`, so only one piece of code
+decides how long to wait — the fetcher's throttle already puts 500 ms of quiet
+before the second attempt leaves.
+
+**`Retry-After` is obeyed or the page is given up on — never split the
+difference.** If a server names a figure, the run waits it out. If that figure is
+longer than this run is willing to wait (10 s), the page is *not* retried at all
+and the failure says so:
+
+```
+"reason": "HTTP 429 … — not retried: server asked for 120s, beyond this run's 10s budget"
+```
+
+The tempting version of that number is a ceiling — wait at most 10 s, then ask
+anyway. That is worse than not honouring the header in the first place: the server
+said 120 and we asked at 10, which is ignoring it while looking like we did not.
+So the budget means "how long we are willing to wait", not "how soon we may ask".
+
+### Proving it, without touching the real site's health
+
+```bash
+node src/index.js --inject-failure
+```
+
+This adds one book URL that does not exist, on our side of the line — the brief is
+explicit that you break things yourself rather than testing failure by hammering
+the site. The run finishes, `books.json` still holds its 60 records, and the report
+says what happened:
+
+```
+  [61/61] FAILED http 404 after 1 attempt(s)  https://books.toscrape.com/catalogue/this-book-does-not-exist_9999/index.html
+
+failed_pages=1
+reconciled=true  (60 valid + 0 invalid + 0 duplicate + 1 failed = 61 of 61 discovered)
+```
+
+`books.json` is byte-identical to a clean run's: the failure changed nothing about
+the records that worked.
+
+## The run report
+
+`output/run-report.json`, written at the end of every run:
+
+```json
+{
+  "started_at": "2026-09-13T12:01:43.779Z",
+  "finished_at": "2026-09-13T12:01:45.730Z",
+  "duration_ms": 1951,
+  "catalogue_pages": 3,
+  "discovered": 61,
+  "unique_urls": 61,
+  "skipped_links": 0,
+  "next_rejected": 0,
+  "requests_sent": 1,
+  "cache_hits": 63,
+  "pages_stored": 60,
+  "valid_records": 60,
+  "invalid_records": 0,
+  "duplicates_dropped": 0,
+  "failed_pages": 1,
+  "failures_by_kind": { "http": 1 },
+  "reconciled": true,
+  "unaccounted_for": 0,
+  "failures": [
+    {
+      "url": "https://books.toscrape.com/catalogue/this-book-does-not-exist_9999/index.html",
+      "source_page": "https://books.toscrape.com/catalogue/page-1.html",
+      "kind": "http",
+      "status": 404,
+      "attempts": 1,
+      "reason": "HTTP 404 Not Found — …"
+    }
+  ]
+}
+```
+
+Two things it deliberately does rather than just counting:
+
+- **Every failure is named.** "One page broke" without saying which page is barely
+  better than saying nothing, so each failure keeps its URL, its kind, its status
+  and how many attempts it cost.
+- **`requests_sent` is what the site's logs would show** — real requests only,
+  retries and failed pages included. Cache reads cost the site nothing and are
+  counted separately. A run that asked twice and reports once is not being honest
+  about the load it caused.
+
+Note that `run-report.json` is *not* reproducible between runs, and should not be:
+it carries timestamps and a duration. The idempotency guarantee is about
+`books.json`.
+
 ### The run checks its own arithmetic
 
 Every URL the crawl found has to end up somewhere nameable — stored, rejected with
-a reason, dropped as a duplicate, or (from Stage 5) failed outright:
+a reason, dropped as a duplicate, or failed outright:
 
 ```
-reconciled=true  (60 valid + 0 invalid + 0 duplicate = 60 of 60 discovered)
+reconciled=true  (60 valid + 0 invalid + 0 duplicate + 0 failed = 60 of 60 discovered)
 ```
 
 If those never add up, a record went missing between the crawl and the file, and
