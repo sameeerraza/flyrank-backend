@@ -1,0 +1,7 @@
+# Cached pages: fetched from the site, re-readable at any time, and hundreds of
+# files. The repo carries the code and one sample output, not this.
+cache/
+
+node_modules/
+.env
+.DS_Store
