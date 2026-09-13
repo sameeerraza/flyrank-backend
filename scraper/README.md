@@ -11,9 +11,9 @@ built-in file system for output. No database, no proxy, no cloud account, no car
 
 ## Status
 
-Stage 5 of 7 — a broken page is logged and skipped instead of taking the run down,
-retryable failures get one more attempt, and every run ends by writing
-`output/run-report.json`.
+Stage 6 of 7 — all stages complete and published. A clean run collects 60
+validated records from three catalogue pages, survives a broken page, and ends
+with an honest report.
 
 | Stage | What | Done |
 | --- | --- | --- |
@@ -23,7 +23,7 @@ retryable failures get one more attempt, and every run ends by writing
 | 3 | Extract the raw records | ✅ |
 | 4 | Clean it, check it, store it | ✅ |
 | 5 | One bad page must not kill the run | ✅ |
-| 6 | Publish the evidence | ⬜ |
+| 6 | Publish the evidence | ✅ |
 
 ## Run it
 
@@ -32,8 +32,17 @@ From a fresh clone of the repo:
 ```bash
 cd scraper
 npm install
-node src/index.js
+npm start
 ```
+
+That is the whole thing: three commands, no database, no API key, no account. It
+writes `output/books.json`, `output/errors.json` and `output/run-report.json`, and
+takes about 45 seconds the first time — most of which is the scraper waiting
+politely between requests. (`npm start` and `node src/index.js` are the same
+command; `npm test` runs the suite.)
+
+A sample `output/` from a real cold run is committed in this repo, so you can see
+what it produces before running anything.
 
 Needs Node.js 20+ — the scraper uses the built-in `fetch` and `AbortSignal.timeout`.
 It is its own npm package, separate from the Task API at the repo root: `cheerio`
@@ -205,6 +214,15 @@ This holds because identity is the canonical URL, records keep discovery order,
 and `fetched_at` comes from the cache file rather than the clock. A matching count
 can still hide a timestamp that moved; an empty diff cannot.
 
+**What this guarantee is not.** It is identical across reruns *on the same cache*,
+not across clones. `cache/` is gitignored, so anyone who clones this repo fetches
+the pages themselves and their files get fresh timestamps — every `fetched_at` will
+differ from the committed sample, and so will the diff. That is not a bug and not
+a broken guarantee: `fetched_at` is provenance, and a fresh clone genuinely did
+fetch at a different time. A record claiming otherwise would be the bug. Nine of
+the ten fields will match exactly; delete `cache/` here and the same thing happens
+locally.
+
 ## When a page breaks
 
 One page is one page. A failure is caught per book, written down, and the loop
@@ -263,28 +281,44 @@ the records that worked.
 
 ## The run report
 
-`output/run-report.json`, written at the end of every run:
+`output/run-report.json`, written at the end of every run. This is the real file
+from the cold run committed in this repo — an empty cache, 63 requests to the site,
+nothing broken:
 
 ```json
 {
-  "started_at": "2026-09-13T12:01:43.779Z",
-  "finished_at": "2026-09-13T12:01:45.730Z",
-  "duration_ms": 1951,
+  "started_at": "2026-09-13T12:17:22.336Z",
+  "finished_at": "2026-09-13T12:18:08.162Z",
+  "duration_ms": 45826,
   "catalogue_pages": 3,
-  "discovered": 61,
-  "unique_urls": 61,
+  "discovered": 60,
+  "unique_urls": 60,
   "skipped_links": 0,
   "next_rejected": 0,
-  "requests_sent": 1,
-  "cache_hits": 63,
+  "requests_sent": 63,
+  "cache_hits": 0,
   "pages_stored": 60,
   "valid_records": 60,
   "invalid_records": 0,
   "duplicates_dropped": 0,
+  "failed_pages": 0,
+  "failures_by_kind": {},
+  "reconciled": true,
+  "unaccounted_for": 0,
+  "failures": []
+}
+```
+
+63 requests for 63 pages — 3 catalogue pages and 60 books, each asked for exactly
+once. Run it again without clearing `cache/` and `requests_sent` is `0`.
+
+A run with a broken page in it looks like this instead (see
+[Proving it](#proving-it-without-touching-the-real-sites-health)):
+
+```json
   "failed_pages": 1,
   "failures_by_kind": { "http": 1 },
   "reconciled": true,
-  "unaccounted_for": 0,
   "failures": [
     {
       "url": "https://books.toscrape.com/catalogue/this-book-does-not-exist_9999/index.html",
@@ -295,7 +329,6 @@ the records that worked.
       "reason": "HTTP 404 Not Found — …"
     }
   ]
-}
 ```
 
 Two things it deliberately does rather than just counting:
@@ -352,6 +385,44 @@ Stage 3 — a raw record is meant to record what was on the page, not improve it
   *"In stock (22 available)"* is markup indentation and nothing more. A
   description is only trimmed: line breaks inside prose are part of what the page
   said, and flattening them would be an edit rather than a read.
+
+## Why this needed no browser
+
+Every value in the record is already in the HTML the server sends — you can read
+the price and the title in `view-source:` before any JavaScript runs — so a browser
+would add startup time, memory and complexity to fetch exactly the same bytes.
+The sandbox itself lists **Requires JavaScript: ✘** for Books to Scrape, and the
+proof is in this repo: the cached pages under `cache/` are raw server responses
+fetched with `fetch`, and every record was parsed out of those. A browser is a tool
+for pages whose content does not exist until scripts build it; reaching for one
+here would be paying a cost for nothing.
+
+## Ethics note
+
+The rules I actually follow, in my own words:
+
+- **Use the front door.** If a site publishes an API, use it. Scraping HTML is what
+  you do when there is no supported way to ask.
+- **Check before you collect.** Read what the site says about itself and what its
+  robots file says, before writing request code — not after something breaks. I
+  wrote that check down in [Target classification](#target-classification) so it
+  can be judged rather than assumed.
+- **Never go around a lock.** No logins, no paywalls, no CAPTCHAs, no blocks worked
+  around, no headers faked to look like someone else. A `403` is an answer, and the
+  answer is no.
+- **Say who you are and go slowly.** An honest user-agent with a link, a delay
+  between requests, a timeout, and a cache so the site is asked once rather than
+  every time I restart the script.
+- **Take only what you need.** Three catalogue pages, eight fields, public product
+  data about fictional books. No personal data — there is none here, and if there
+  were, this scope would not include it.
+- **Keep the receipts.** Every record says where it came from and when, so a claim
+  made from this data can be traced back to the page that supports it.
+
+This project touches one public sandbox that exists to be practised on. The code
+would need a fresh look at the rules and terms before it were pointed anywhere
+else — which is the promise at the [bottom of this file](#scope-promise), and the
+reason the scope check is enforced in code and not just written here.
 
 ## Known limitation
 
