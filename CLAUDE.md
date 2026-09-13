@@ -5,6 +5,17 @@ with code in this repository.
 
 ## What this is
 
+**Two unrelated projects share this repo**, one per FlyRank assignment. They
+have separate manifests, separate dependencies, and nothing in common but the
+git history:
+
+- **the repo root** — a CRUD "Task API" (Express + Postgres) with a Supabase
+  Auth layer (A1–A4). Everything below describes this project.
+- **`scraper/`** — the W5/A9 "polite scraper", its own npm package with its own
+  `package.json`, `node_modules`, tests and README. It has its own `CLAUDE.md`;
+  read that instead when working in there, and never add its dependencies
+  (`cheerio`, `zod`) to the root manifest.
+
 A small CRUD "Task API" (Express + Postgres) with a Supabase Auth layer on
 top, built as a series of staged FlyRank internship backend assignments
 (A1, A2, A3, A4). `README.md` has the full endpoint table, task JSON
@@ -64,7 +75,8 @@ SQL shell against the running container:
 docker compose exec db psql -U postgres -d tasks
 ```
 
-There is no build step, linter, or test suite in this repo.
+There is no build step, linter, or test suite for the Task API. (`scraper/` has
+its own suite — `cd scraper && npm test`.)
 
 ## Architecture
 
